@@ -7,6 +7,7 @@ import (
 )
 
 var (
+	NamespaceGroupKind   = schema.GroupKind{Kind: "Namespace"}
 	ServiceGroupKind     = schema.GroupKind{Kind: "Service"}
 	ServicePortGroupKind = schema.GroupKind{Kind: "ServicePort"}
 )

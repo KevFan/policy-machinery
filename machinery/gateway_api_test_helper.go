@@ -29,6 +29,22 @@ func BuildGatewayClass(f ...func(*gwapiv1.GatewayClass)) *gwapiv1.GatewayClass {
 	return gc
 }
 
+func BuildNamespace(f ...func(*core.Namespace)) *core.Namespace {
+	ns := &core.Namespace{
+		TypeMeta: metav1.TypeMeta{
+			APIVersion: core.SchemeGroupVersion.String(),
+			Kind:       "Namespace",
+		},
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "my-namespace",
+		},
+	}
+	for _, fn := range f {
+		fn(ns)
+	}
+	return ns
+}
+
 func BuildGateway(f ...func(*gwapiv1.Gateway)) *gwapiv1.Gateway {
 	g := &gwapiv1.Gateway{
 		TypeMeta: metav1.TypeMeta{
@@ -269,6 +285,7 @@ func BuildUDPRoute(f ...func(route *gwapiv1alpha2.UDPRoute)) *gwapiv1alpha2.UDPR
 
 type GatewayAPIResources struct {
 	GatewayClasses []*gwapiv1.GatewayClass
+	Namespaces     []*core.Namespace
 	Gateways       []*gwapiv1.Gateway
 	HTTPRoutes     []*gwapiv1.HTTPRoute
 	GRPCRoutes     []*gwapiv1.GRPCRoute
@@ -323,6 +340,9 @@ func BuildComplexGatewayAPITopology(funcs ...func(*GatewayAPIResources)) Gateway
 		GatewayClasses: []*gwapiv1.GatewayClass{
 			BuildGatewayClass(func(gc *gwapiv1.GatewayClass) { gc.Name = "gatewayclass-1" }),
 			BuildGatewayClass(func(gc *gwapiv1.GatewayClass) { gc.Name = "gatewayclass-2" }),
+		},
+		Namespaces: []*core.Namespace{
+			BuildNamespace(),
 		},
 		Gateways: []*gwapiv1.Gateway{
 			BuildGateway(func(g *gwapiv1.Gateway) {

@@ -12,6 +12,7 @@ import (
 
 type GatewayAPITopologyOptions struct {
 	GatewayClasses []*GatewayClass
+	Namespaces     []*Namespace
 	Gateways       []*Gateway
 	HTTPRoutes     []*HTTPRoute
 	GRPCRoutes     []*GRPCRoute
@@ -39,6 +40,14 @@ func WithGatewayClasses(gatewayClasses ...*gwapiv1.GatewayClass) GatewayAPITopol
 	return func(o *GatewayAPITopologyOptions) {
 		o.GatewayClasses = append(o.GatewayClasses, lo.Map(gatewayClasses, func(gatewayClass *gwapiv1.GatewayClass, _ int) *GatewayClass {
 			return &GatewayClass{GatewayClass: gatewayClass}
+		})...)
+	}
+}
+
+func WithNamespaces(namespaces ...*core.Namespace) GatewayAPITopologyOptionsFunc {
+	return func(o *GatewayAPITopologyOptions) {
+		o.Namespaces = append(o.Namespaces, lo.Map(namespaces, func(namespace *core.Namespace, _ int) *Namespace {
+			return &Namespace{Namespace: namespace}
 		})...)
 	}
 }
@@ -198,6 +207,7 @@ func NewGatewayAPITopology(options ...GatewayAPITopologyOptionsFunc) *Topology {
 		WithObjects(o.Objects...),
 		WithPolicies(o.Policies...),
 		WithTargetables(o.GatewayClasses...),
+		WithTargetables(o.Namespaces...),
 		WithTargetables(o.Gateways...),
 		WithTargetables(o.HTTPRoutes...),
 		WithTargetables(o.GRPCRoutes...),
@@ -206,7 +216,15 @@ func NewGatewayAPITopology(options ...GatewayAPITopologyOptionsFunc) *Topology {
 		WithTargetables(o.UDPRoutes...),
 		WithTargetables(o.Services...),
 		WithLinks(o.Links...),
-		WithLinks(LinkGatewayClassToGatewayFunc(o.GatewayClasses)), // GatewayClass -> Gateway
+		WithLinks(
+			LinkGatewayClassToGatewayFunc(o.GatewayClasses),        // GatewayClass -> Gateway
+			LinkNamespaceToGatewayFunc(o.Namespaces),               // Namespace -> Gateway
+			LinkNamespaceToHTTPRouteFunc(o.Namespaces, o.Gateways), // Namespace -> HTTPRoute
+			LinkNamespaceToGRPCRouteFunc(o.Namespaces, o.Gateways), // Namespace -> GRPCRoute
+			LinkNamespaceToTCPRouteFunc(o.Namespaces, o.Gateways),  // Namespace -> TCPRoute
+			LinkNamespaceToTLSRouteFunc(o.Namespaces, o.Gateways),  // Namespace -> TLSRoute
+			LinkNamespaceToUDPRouteFunc(o.Namespaces, o.Gateways),  // Namespace -> UDPRoute
+		),
 	}
 
 	if o.ExpandGatewayListeners {
@@ -459,6 +477,98 @@ func LinkGatewayClassToGatewayFunc(gatewayClasses []*GatewayClass) LinkFunc {
 			return nil
 		},
 	}
+}
+
+func LinkNamespaceToGatewayFunc(namepaces []*Namespace) LinkFunc {
+	return LinkFunc{
+		From: NamespaceGroupKind,
+		To:   GatewayGroupKind,
+		Func: func(child Object) []Object {
+			gateway := child.(*Gateway)
+			namepace, ok := lo.Find(namepaces, func(ns *Namespace) bool {
+				return ns.Name == gateway.Namespace
+			})
+			if ok {
+				return []Object{namepace}
+			}
+			return nil
+		},
+	}
+}
+
+func LinkNamespaceToHTTPRouteFunc(namespaces []*Namespace, gateways []*Gateway) LinkFunc {
+	return LinkFunc{
+		From: NamespaceGroupKind,
+		To:   HTTPRouteGroupKind,
+		Func: func(child Object) []Object {
+			route := child.(*HTTPRoute)
+			return findNamespaceForRoute(namespaces, gateways, route.Namespace, route.Spec.ParentRefs)
+		},
+	}
+}
+
+func LinkNamespaceToGRPCRouteFunc(namespaces []*Namespace, gateways []*Gateway) LinkFunc {
+	return LinkFunc{
+		From: NamespaceGroupKind,
+		To:   GRPCRouteGroupKind,
+		Func: func(child Object) []Object {
+			route := child.(*GRPCRoute)
+			return findNamespaceForRoute(namespaces, gateways, route.Namespace, route.Spec.ParentRefs)
+		},
+	}
+}
+
+func LinkNamespaceToTCPRouteFunc(namespaces []*Namespace, gateways []*Gateway) LinkFunc {
+	return LinkFunc{
+		From: NamespaceGroupKind,
+		To:   TCPRouteGroupKind,
+		Func: func(child Object) []Object {
+			route := child.(*TCPRoute)
+			return findNamespaceForRoute(namespaces, gateways, route.Namespace, route.Spec.ParentRefs)
+		},
+	}
+}
+
+func LinkNamespaceToTLSRouteFunc(namespaces []*Namespace, gateways []*Gateway) LinkFunc {
+	return LinkFunc{
+		From: NamespaceGroupKind,
+		To:   TLSRouteGroupKind,
+		Func: func(child Object) []Object {
+			route := child.(*TLSRoute)
+			return findNamespaceForRoute(namespaces, gateways, route.Namespace, route.Spec.ParentRefs)
+		},
+	}
+}
+
+func LinkNamespaceToUDPRouteFunc(namespaces []*Namespace, gateways []*Gateway) LinkFunc {
+	return LinkFunc{
+		From: NamespaceGroupKind,
+		To:   UDPRouteGroupKind,
+		Func: func(child Object) []Object {
+			route := child.(*UDPRoute)
+			return findNamespaceForRoute(namespaces, gateways, route.Namespace, route.Spec.ParentRefs)
+		},
+	}
+}
+
+func findNamespaceForRoute(namespaces []*Namespace, gateways []*Gateway, routeNamespace string, routeParentRefs []gwapiv1.ParentReference) []Object {
+	namespace, ok := lo.Find(namespaces, func(ns *Namespace) bool {
+		return ns.Name == routeNamespace
+	})
+
+	if !ok {
+		return nil
+	}
+
+	//linkedGateways := lo.FilterMap(routeParentRefs, findGatewayFromParentRefFunc(gateways, routeNamespace))
+	//
+	//// if route is already linked by Gateway through parent ref and the Gateway is in the same namespace,
+	//// there no need to link route with namespace also
+	//if len(linkedGateways) != 0 && namespace.Name == linkedGateways[0].GetNamespace() {
+	//	return nil
+	//}
+
+	return []Object{namespace}
 }
 
 // LinkGatewayToHTTPRouteFunc returns a link function that teaches a topology how to link HTTPRoutes from known

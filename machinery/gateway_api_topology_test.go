@@ -44,6 +44,7 @@ func TestGatewayAPITopology(t *testing.T) {
 			name: "one of each kind",
 			targetables: GatewayAPIResources{
 				GatewayClasses: []*gwapiv1.GatewayClass{BuildGatewayClass()},
+				Namespaces:     []*core.Namespace{BuildNamespace()},
 				Gateways:       []*gwapiv1.Gateway{BuildGateway()},
 				HTTPRoutes:     []*gwapiv1.HTTPRoute{BuildHTTPRoute()},
 				GRPCRoutes:     []*gwapiv1.GRPCRoute{BuildGRPCRoute()},
@@ -55,6 +56,7 @@ func TestGatewayAPITopology(t *testing.T) {
 			policies: []Policy{buildPolicy()},
 			expectedLinks: map[string][]string{
 				"my-gateway-class": {"my-gateway"},
+				"my-namespace":     {"my-gateway"},
 				"my-gateway":       {"my-http-route", "my-grpc-route", "my-tcp-route", "my-tls-route", "my-udp-route"},
 				"my-grpc-route":    {"my-service"},
 				"my-http-route":    {"my-service"},
@@ -64,11 +66,91 @@ func TestGatewayAPITopology(t *testing.T) {
 			},
 		},
 		{
+			name: "multiple namespaces - linking routes across namespaces",
+			targetables: GatewayAPIResources{
+				GatewayClasses: []*gwapiv1.GatewayClass{
+					BuildGatewayClass(),
+				},
+				Namespaces: []*core.Namespace{
+					BuildNamespace(func(namespace *core.Namespace) {
+						namespace.Name = "namespace-1"
+					}),
+					BuildNamespace(func(namespace *core.Namespace) {
+						namespace.Name = "namespace-2"
+					}),
+					BuildNamespace(func(namespace *core.Namespace) {
+						namespace.Name = "namespace-3"
+					}),
+				},
+				Gateways: []*gwapiv1.Gateway{
+					BuildGateway(func(gateway *gwapiv1.Gateway) {
+						gateway.Name = "gateway-1"
+						gateway.Namespace = "namespace-1"
+					}),
+					BuildGateway(func(gateway *gwapiv1.Gateway) {
+						gateway.Name = "gateway-2"
+						gateway.Namespace = "namespace-2"
+					}),
+				},
+				HTTPRoutes: []*gwapiv1.HTTPRoute{
+					BuildHTTPRoute(func(httpRoute *gwapiv1.HTTPRoute) {
+						httpRoute.Namespace = "namespace-1"
+						httpRoute.Name = "http-route-1"
+						httpRoute.Spec.ParentRefs[0].Name = "gateway-1"
+					}),
+					BuildHTTPRoute(func(httpRoute *gwapiv1.HTTPRoute) {
+						httpRoute.Namespace = "namespace-3"
+						httpRoute.Name = "http-route-2"
+						httpRoute.Spec.ParentRefs[0].Namespace = ptr.To[gwapiv1.Namespace]("namespace-1")
+						httpRoute.Spec.ParentRefs[0].Name = "gateway-1"
+					}),
+				},
+				GRPCRoutes: []*gwapiv1.GRPCRoute{
+					BuildGRPCRoute(func(grpcRoute *gwapiv1.GRPCRoute) {
+						grpcRoute.Namespace = "namespace-3"
+						grpcRoute.Name = "grpc-route-1"
+						grpcRoute.Spec.ParentRefs[0].Namespace = ptr.To[gwapiv1.Namespace]("namespace-1")
+						grpcRoute.Spec.ParentRefs[0].Name = "gateway-1"
+					}),
+				},
+				TCPRoutes: []*gwapiv1alpha2.TCPRoute{
+					BuildTCPRoute(func(tcpRoute *gwapiv1alpha2.TCPRoute) {
+						tcpRoute.Namespace = "namespace-1"
+						tcpRoute.Name = "tcp-route-1"
+						tcpRoute.Spec.ParentRefs[0].Name = "gateway-1"
+					}),
+				},
+				TLSRoutes: []*gwapiv1alpha2.TLSRoute{
+					BuildTLSRoute(func(tlsRoute *gwapiv1alpha2.TLSRoute) {
+						tlsRoute.Namespace = "namespace-3"
+						tlsRoute.Name = "tls-route-1"
+						tlsRoute.Spec.ParentRefs[0].Namespace = ptr.To[gwapiv1.Namespace]("namespace-1")
+						tlsRoute.Spec.ParentRefs[0].Name = "gateway-1"
+					}),
+				},
+				UDPRoutes: []*gwapiv1alpha2.UDPRoute{
+					BuildUDPRoute(func(udpRoute *gwapiv1alpha2.UDPRoute) {
+						udpRoute.Namespace = "namespace-1"
+						udpRoute.Name = "udp-route-1"
+						udpRoute.Spec.ParentRefs[0].Name = "gateway-1"
+					}),
+				},
+			},
+			expectedLinks: map[string][]string{
+				"my-gateway-class": {"gateway-1", "gateway-2"},
+				"namespace-1":      {"gateway-1"},
+				"namespace-2":      {"gateway-2"},
+				"namespace-3":      {"http-route-2", "grpc-route-1", "tls-route-1"},
+				"gateway-1":        {"http-route-1", "http-route-2", "grpc-route-1", "tcp-route-1", "tls-route-1", "udp-route-1"},
+			},
+		},
+		{
 			name:        "complex topology",
 			targetables: BuildComplexGatewayAPITopology(),
 			expectedLinks: map[string][]string{
 				"gatewayclass-1": {"gateway-1", "gateway-2", "gateway-3"},
 				"gatewayclass-2": {"gateway-4", "gateway-5"},
+				"my-namespace":   {"gateway-1", "gateway-2", "gateway-3", "gateway-4", "gateway-5"},
 				"gateway-1":      {"http-route-1", "http-route-2"},
 				"gateway-2":      {"http-route-2", "http-route-3"},
 				"gateway-3":      {"udp-route-1", "tls-route-1"},
@@ -89,6 +171,7 @@ func TestGatewayAPITopology(t *testing.T) {
 			gatewayClasses := lo.Map(tc.targetables.GatewayClasses, func(gatewayClass *gwapiv1.GatewayClass, _ int) *GatewayClass {
 				return &GatewayClass{GatewayClass: gatewayClass}
 			})
+			namespaces := lo.Map(tc.targetables.Namespaces, func(namespace *core.Namespace, _ int) *Namespace { return &Namespace{Namespace: namespace} })
 			gateways := lo.Map(tc.targetables.Gateways, func(gateway *gwapiv1.Gateway, _ int) *Gateway { return &Gateway{Gateway: gateway} })
 			httpRoutes := lo.Map(tc.targetables.HTTPRoutes, func(httpRoute *gwapiv1.HTTPRoute, _ int) *HTTPRoute { return &HTTPRoute{HTTPRoute: httpRoute} })
 			grpcRoutes := lo.Map(tc.targetables.GRPCRoutes, func(grpcRoute *gwapiv1.GRPCRoute, _ int) *GRPCRoute { return &GRPCRoute{GRPCRoute: grpcRoute} })
@@ -99,6 +182,7 @@ func TestGatewayAPITopology(t *testing.T) {
 
 			topology := NewTopology(
 				WithTargetables(gatewayClasses...),
+				WithTargetables(namespaces...),
 				WithTargetables(gateways...),
 				WithTargetables(httpRoutes...),
 				WithTargetables(services...),
@@ -108,6 +192,12 @@ func TestGatewayAPITopology(t *testing.T) {
 				WithTargetables(udpRoutes...),
 				WithLinks(
 					LinkGatewayClassToGatewayFunc(gatewayClasses),
+					LinkNamespaceToGatewayFunc(namespaces),
+					LinkNamespaceToHTTPRouteFunc(namespaces, gateways),
+					LinkNamespaceToGRPCRouteFunc(namespaces, gateways),
+					LinkNamespaceToTCPRouteFunc(namespaces, gateways),
+					LinkNamespaceToTLSRouteFunc(namespaces, gateways),
+					LinkNamespaceToUDPRouteFunc(namespaces, gateways),
 					LinkGatewayToHTTPRouteFunc(gateways),
 					LinkGatewayToGRPCRouteFunc(gateways),
 					LinkGatewayToTCPRouteFunc(gateways),
@@ -158,6 +248,7 @@ func TestGatewayAPITopologyWithSectionNames(t *testing.T) {
 			name: "one of each kind",
 			targetables: GatewayAPIResources{
 				GatewayClasses: []*gwapiv1.GatewayClass{BuildGatewayClass()},
+				Namespaces:     []*core.Namespace{BuildNamespace()},
 				Gateways:       []*gwapiv1.Gateway{BuildGateway()},
 				HTTPRoutes:     []*gwapiv1.HTTPRoute{BuildHTTPRoute()},
 				GRPCRoutes:     []*gwapiv1.GRPCRoute{BuildGRPCRoute()},
@@ -169,6 +260,7 @@ func TestGatewayAPITopologyWithSectionNames(t *testing.T) {
 			policies: []Policy{buildPolicy()},
 			expectedLinks: map[string][]string{
 				"my-gateway-class":       {"my-gateway"},
+				"my-namespace":           {"my-gateway"},
 				"my-gateway":             {"my-gateway#my-listener"},
 				"my-gateway#my-listener": {"my-http-route", "my-grpc-route", "my-tcp-route", "my-tls-route", "my-udp-route"},
 				"my-grpc-route":          {"my-grpc-route#rule-1"},
@@ -268,6 +360,7 @@ func TestGatewayAPITopologyWithSectionNames(t *testing.T) {
 				"service-5":            {"service-5#port-1"},
 				"service-6":            {"service-6#port-1"},
 				"service-7":            {"service-7#port-1"},
+				"my-namespace":         {"gateway-1", "gateway-2", "gateway-3", "gateway-4", "gateway-5"},
 			},
 		},
 	}
@@ -275,6 +368,7 @@ func TestGatewayAPITopologyWithSectionNames(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			topology := NewGatewayAPITopology(
 				WithGatewayClasses(tc.targetables.GatewayClasses...),
+				WithNamespaces(tc.targetables.Namespaces...),
 				WithGateways(tc.targetables.Gateways...),
 				ExpandGatewayListeners(),
 				WithHTTPRoutes(tc.targetables.HTTPRoutes...),
