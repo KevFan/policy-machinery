@@ -264,6 +264,7 @@ func buildReconciler(gatewayProviders []string, client *dynamic.DynamicClient) c
 		Tasks: []controller.ReconcileFunc{
 			(&reconcilers.TopologyFileReconciler{}).Reconcile,
 			effectivePolicyReconciler.Reconcile,
+			reconcilers.NewStatusReconciler(client).Reconcile,
 		},
 	}
 
